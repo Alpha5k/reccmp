@@ -32,6 +32,39 @@ def test_code_variable(parser: DecompParser):
     assert not parser.alerts
 
 
+def test_array_with_space_before_bracket(parser: DecompParser):
+    """A space between the name and the brackets is allowed (as in Lua's sources)."""
+    parser.read(dedent("""\
+        // GLOBAL: TEST 0x1234
+        static const char *const token2string [] = {
+            "and", "break"
+        };
+        """))
+
+    assert parser.variables[0].name == "token2string"
+    assert not parser.alerts
+
+
+@pytest.mark.parametrize(
+    "type_line",
+    ("static const struct {", "struct Pair {", "static union {"),
+)
+def test_variable_of_type_defined_in_declaration(parser: DecompParser, type_line: str):
+    """When the declaration defines its type, the name follows the type's body."""
+    parser.read(dedent(f"""\
+        // GLOBAL: TEST 0x1234
+        {type_line}
+          int left;
+          int right;
+        }} priority[] = {{
+           {{6, 6}}, {{7, 7}}
+        }};
+        """))
+
+    assert parser.variables[0].name == "priority"
+    assert not parser.alerts
+
+
 def test_comment_variable(parser: DecompParser):
     """Should read the name from a comment."""
     parser.read(dedent("""\
