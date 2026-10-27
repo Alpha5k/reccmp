@@ -108,6 +108,10 @@ class CvdumpNode:
                 self.node_type = EntityType.FLOAT
                 self.confirmed_size = size
 
+        elif self.decorated_name.startswith("__xmm@"):
+            self.node_type = EntityType.DATA
+            self.confirmed_size = 16
+
         elif not self.decorated_name.startswith("?") and "@" in self.decorated_name:
             # C mangled symbol. The trailing at-sign with number tells the number of bytes
             # in the parameter list for __stdcall, __fastcall, or __vectorcall
