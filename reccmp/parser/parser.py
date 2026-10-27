@@ -71,6 +71,9 @@ class DecompParser:
 
         self.seen_functions: dict[str, list[tuple[int, range]]] = {}
 
+        self._marker_positions: list[int] = []
+        """Text positions of the FUNCTION and STUB markers in the current file."""
+
     def reset_and_set_filename(self, filename: PurePath):
         self._symbols = []
         self.alerts = []
@@ -81,6 +84,7 @@ class DecompParser:
         self.enclosures.clear()
         self.namespaces.clear()
         self.seen_functions.clear()
+        self._marker_positions = []
 
     def _qualify(self, name: str | None, pos: int) -> str:
         """Qualify the provided name with the combined scope names for our current file position."""
@@ -214,6 +218,13 @@ class DecompParser:
     ):
         start_line, _ = get_line_column_pos(self.newlines, start)
         end_line, _ = get_line_column_pos(self.newlines, end)
+
+        # A FUNCTION or STUB marker inside the body (e.g. on a member function of
+        # a local class) begins another function. End this function's line range
+        # before it, or the nested function's first line would be a second match.
+        nested = [p for p in self._marker_positions if start < p <= end]
+        if nested:
+            end_line = get_line_column_pos(self.newlines, min(nested))[0] - 1
 
         for marker in markers:
             if marker.type in {
@@ -602,6 +613,13 @@ class DecompParser:
         possible_markers = {m.start(): m.groups() for m in markerRegex.finditer(text)}
         if not possible_markers:
             return
+
+        self._marker_positions = sorted(
+            pos
+            for pos, groups in possible_markers.items()
+            if match_marker(pos, pos, groups, self.aliases).type
+            in (MarkerType.FUNCTION, MarkerType.STUB)
+        )
 
         # Find the boundaries of all scopes now so we do not need to keep the stack
         # up to date while reading.
