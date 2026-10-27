@@ -192,7 +192,10 @@ def get_name_for_offset(
 
         if t.kind == TypeKind.ARRAY:
             element = types.get(types.element_type(t.key))
-            assert element.size
+            if not element.size:
+                # The element is a forward reference we could not resolve
+                # (no definition, or no UDT link to it), so its size is unknown.
+                break
 
             array_idx = offset // element.size
             type_key = element.key
