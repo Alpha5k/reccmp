@@ -73,7 +73,9 @@ global_regex = re.compile(
     r"""
     (?P<name>(?:\w+::)*\w+)       # Any identifier with 0-N namespace qualifiers
     (?:                           # Suffix options:
-        \(\w|                     # - Open paren: call constructor
+        \(                        # - Constructor initialization, not a calling convention
+        (?!__(?:cdecl|stdcall|fastcall|thiscall|vectorcall|clrcall)\b)
+        \w|
         \)\(|                     # - Close paren, open paren: function pointer variable
         \s*\[.*|                  # - Open bracket: array with or without size
         \s*=|
