@@ -622,42 +622,40 @@ class PEImage(Image):
         jump destinations given by local offset) will be here.
         One use case is to tell whether an immediate value in an operand represents
         a virtual address or just a big number."""
-        reloc_sections = self.get_sections_in_data_directory(
+        region = self.get_data_directory_region(
             PEDataDirectoryItemType.BASE_RELOCATION_TABLE
         )
+        if region is None or region.virtual_size == 0:
+            return set()
 
+        reloc = self.read(region.virtual_address, region.virtual_size)
         relocations = set()
+        ofs = 0
 
-        for reloc_section in reloc_sections:
-            reloc = reloc_section.view
-            ofs = 0
+        # Parse the structure in .reloc to get the list locations to check.
+        # The first 8 bytes are 2 dwords that give the base page address
+        # and the total block size (including this header).
+        # The page address is used to compact the list; each entry is only
+        # 2 bytes, and these are added to the base to get the full location.
+        while ofs < len(reloc):
+            page_base, block_size = struct.unpack("<2I", reloc[ofs : ofs + 8])
+            if block_size == 0:
+                break
 
-            # Parse the structure in .reloc to get the list locations to check.
-            # The first 8 bytes are 2 dwords that give the base page address
-            # and the total block size (including this header).
-            # The page address is used to compact the list; each entry is only
-            # 2 bytes, and these are added to the base to get the full location.
-            # If the entry read in is zero, we are at the end of this section and
-            # these are padding bytes.
-            while True:
-                page_base, block_size = struct.unpack("<2I", reloc[ofs : ofs + 8])
-                if block_size == 0:
-                    break
-
-                values = [
-                    v[0]
-                    for v in struct.iter_unpack("<H", reloc[ofs + 8 : ofs + block_size])
+            values = [
+                v[0]
+                for v in struct.iter_unpack("<H", reloc[ofs + 8 : ofs + block_size])
+            ]
+            relocations.update(
+                [
+                    # HACK: ignore the relocation type for now (the top 4 bits of the value).
+                    self.imagebase + page_base + (v & 0xFFF)
+                    for v in values
+                    if v != 0
                 ]
-                relocations.update(
-                    [
-                        # HACK: ignore the relocation type for now (the top 4 bits of the value).
-                        self.imagebase + page_base + (v & 0xFFF)
-                        for v in values
-                        if v != 0
-                    ]
-                )
+            )
 
-                ofs += block_size
+            ofs += block_size
 
         return relocations
 
