@@ -231,6 +231,15 @@ class DecompParser:
 
             is_folded = options["FOLDED"]
 
+            # Exclude a parsed local class member from its enclosing function's lookup.
+            for outer in self.functions:
+                if (
+                    not outer.lookup_by_name
+                    and outer.end_line is not None
+                    and outer.line_number < start_line <= outer.end_line
+                ):
+                    outer.end_line = start_line - 1
+
             self.seen_functions.setdefault(marker.module, []).insert(
                 0, (marker.offset, range(start, end + 1))
             )
