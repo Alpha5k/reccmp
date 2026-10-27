@@ -65,6 +65,17 @@ def test_variable_of_type_defined_in_declaration(parser: DecompParser, type_line
     assert not parser.alerts
 
 
+def test_array_of_function_pointers(parser: DecompParser):
+    """The return type's open paren must not be read as a constructor call."""
+    parser.read(dedent("""\
+        // GLOBAL: TEST 0x1234
+        void(__cdecl* Renderer::m_resetFunctions[100])(int);
+        """))
+
+    assert parser.variables[0].name == "Renderer::m_resetFunctions"
+    assert not parser.alerts
+
+
 def test_comment_variable(parser: DecompParser):
     """Should read the name from a comment."""
     parser.read(dedent("""\

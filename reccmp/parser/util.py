@@ -94,11 +94,22 @@ def defines_type(line: str) -> bool:
     return type_definition_regex.search(line) is not None
 
 
+# Words that can be followed by an open paren in a declaration without being its name,
+# as in `void(__cdecl* Table[4])(int);`.
+_type_keywords = frozenset(
+    (
+        "void", "bool", "char", "short", "int", "long", "float", "double",
+        "signed", "unsigned", "const", "volatile", "static", "extern",
+    )
+)  # fmt: skip
+
+
 def get_variable_name(line: str) -> str | None:
     """Grab the name of the variable annotated with the GLOBAL marker."""
 
-    if (match := global_regex.search(line)) is not None:
-        return match.group("name")
+    for match in global_regex.finditer(line):
+        if match.group("name") not in _type_keywords:
+            return match.group("name")
 
     return None
 
