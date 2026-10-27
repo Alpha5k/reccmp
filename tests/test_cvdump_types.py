@@ -561,6 +561,31 @@ def test_offset_name_for_array_of_structs(parser: CvdumpTypesParser):
     assert get_name_for_offset(parser, TK(0x19B1), 436) == "[21].m_unk0x10"
 
 
+ARRAY_OF_UNRESOLVED_FORWARD_REF = """
+0xd095 : Length = 90, Leaf = 0x1505 LF_STRUCTURE
+	# members = 0,  field list type 0x0000, FORWARD REF,
+	Derivation list type 0x0000, VT shape type 0x0000
+	Size = 0, class name = DefaultCombo::DeflectAnimation, unique name = .?AUDeflectAnimation@DefaultCombo@@
+
+0xd096 : Length = 14, Leaf = 0x1503 LF_ARRAY
+    Element type = 0xD095
+    Index type = T_ULONG(0022)
+    length = 64
+    Name =
+"""
+
+
+def test_offset_name_for_array_of_unresolved_forward_ref(
+    empty_parser: CvdumpTypesParser,
+):
+    """The element is a forward reference without a definition (no UDT link),
+    so its size is unknown. Fall back to the plain offset instead of failing."""
+    empty_parser.read_all(ARRAY_OF_UNRESOLVED_FORWARD_REF)
+    assert empty_parser.get(TK(0xD095)).size is None
+    assert get_name_for_offset(empty_parser, TK(0xD096), 0) == ""
+    assert get_name_for_offset(empty_parser, TK(0xD096), 8) == "+8"
+
+
 def test_struct(parser: CvdumpTypesParser):
     """Basic test for converting type into struct.unpack format string."""
     # MxCore: vftable and uint32. The vftable pointer is read as uint32.

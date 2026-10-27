@@ -26,6 +26,30 @@ def test_function_indent_one_line(parser: DecompParser):
     assert parser.functions[0].end_line == 2
 
 
+def test_function_with_nested_function_marker(parser: DecompParser):
+    """A FUNCTION marker inside the body (here on a member function of a local
+    class) ends the outer function's line range, so that the nested function's
+    first line is not counted as a second function in the outer one."""
+    parser.read(dedent("""\
+        // FUNCTION: TEST 0x1000
+        int test()
+        {
+            struct Local
+            {
+                // FUNCTION: TEST 0x2000
+                int get() { return 1; }
+            };
+            Local l;
+            return l.get();
+        }
+        """))
+    assert len(parser.alerts) == 0
+    outer = next(f for f in parser.functions if f.offset == 0x1000)
+    inner = next(f for f in parser.functions if f.offset == 0x2000)
+    assert (outer.line_number, outer.end_line) == (2, 5)
+    assert (inner.line_number, inner.end_line) == (7, 7)
+
+
 def test_function_indent_allman(parser: DecompParser):
     """Declaration and brackets are each on their own line."""
     parser.read(dedent("""\
