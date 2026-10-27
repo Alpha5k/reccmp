@@ -1,6 +1,5 @@
 """Analysis related to x86 floating point instructions.
-All floating point instructions use two byte opcodes. The first byte is in the range D8 to DF.
-The second indicates the operation and pointer or registers used.
+x87 instructions start with D8 to DF; scalar SSE instructions use an F2 or F3 prefix.
 
 We are interested in floating point constants, so we want to exclude instructions that:
 - access the status register or environment (FLDCW, FLDENV)
@@ -16,6 +15,8 @@ from typing import Iterator, NamedTuple
 from typing_extensions import Buffer
 from reccmp.formats import PEImage
 
+SCALAR_SSE_OPCODES = (0x10, 0x51, 0x58, 0x59, 0x5A, 0x5C, 0x5D, 0x5E, 0x5F)
+
 SINGLE_PRECISION_OPCODES = frozenset(
     [
         (0xD8, 0x05),  # fadd
@@ -27,6 +28,11 @@ SINGLE_PRECISION_OPCODES = frozenset(
         (0xD8, 0x35),  # fdiv
         (0xD8, 0x3D),  # fdivr
         (0xD9, 0x05),  # fld
+    ]
+    + [
+        (0xF3, 0x0F, opcode, modrm)
+        for opcode in SCALAR_SSE_OPCODES
+        for modrm in range(0x05, 0x40, 0x08)
     ]
 )
 
@@ -42,6 +48,11 @@ DOUBLE_PRECISION_OPCODES = frozenset(
         (0xDC, 0x3D),  # fdivr
         (0xDD, 0x05),  # fld
     ]
+    + [
+        (0xF2, 0x0F, opcode, modrm)
+        for opcode in SCALAR_SSE_OPCODES
+        for modrm in range(0x05, 0x40, 0x08)
+    ]
 )
 
 FLOAT_OPCODES = frozenset([*SINGLE_PRECISION_OPCODES, *DOUBLE_PRECISION_OPCODES])
@@ -50,15 +61,17 @@ FLOAT_OPCODES = frozenset([*SINGLE_PRECISION_OPCODES, *DOUBLE_PRECISION_OPCODES]
 # Match a superset of the floating point instructions above.
 # Uses positive lookahead to support overlapping matches.
 FLOAT_INSTRUCTION_RE = re.compile(
-    rb"(?=([\xd8\xd9\xdc\xdd][\x05\x0d\x15\x1d\x25\x2d\x35\x3d].{4}))", flags=re.S
+    rb"(?=((?:[\xd8\xd9\xdc\xdd]|[\xf2\xf3]\x0f[\x10\x51\x58\x59\x5a\x5c-\x5f])"
+    rb"[\x05\x0d\x15\x1d\x25\x2d\x35\x3d].{4}))",
+    flags=re.S,
 )
 
 
 class FloatInstruction(NamedTuple):
     # The address (or offset) of the instruction
     address: int
-    # Two byte opcode of the instruction
-    opcode: tuple[int, int]
+    # Instruction bytes before the absolute address operand
+    opcode: tuple[int, ...]
     # The address used in the operand
     pointer: int
 
@@ -72,10 +85,10 @@ def find_float_instructions_in_buffer(
     """
     for match in FLOAT_INSTRUCTION_RE.finditer(buf):
         inst = match.group(1)
-        opcode = (inst[0], inst[1])
+        opcode = tuple(inst[:-4])
 
         if opcode in FLOAT_OPCODES:
-            (pointer,) = struct.unpack("<I", inst[2:6])
+            (pointer,) = struct.unpack("<I", inst[-4:])
             yield FloatInstruction(base_addr + match.start(), opcode, pointer)
 
 
@@ -105,17 +118,16 @@ def find_float_consts(image: PEImage) -> Iterator[FloatConstant]:
             seen.add(inst.pointer)
 
             # Make sure that the address of the operand is a relocation.
-            if inst.address + 2 not in image.relocations:
+            if inst.address + len(inst.opcode) not in image.relocations:
                 continue
 
             # Ignore instructions that point to variables
-            if any(inst.pointer in region.range for region in const_regions):
-                if inst.opcode in SINGLE_PRECISION_OPCODES:
-                    # dword ptr -- single precision
-                    (float_value,) = struct.unpack("<f", image.read(inst.pointer, 4))
-                    yield FloatConstant(inst.pointer, 4, float_value)
-
-                elif inst.opcode in DOUBLE_PRECISION_OPCODES:
-                    # qword ptr -- double precision
-                    (float_value,) = struct.unpack("<d", image.read(inst.pointer, 8))
-                    yield FloatConstant(inst.pointer, 8, float_value)
+            size = 4 if inst.opcode in SINGLE_PRECISION_OPCODES else 8
+            if any(
+                inst.pointer in region.range and inst.pointer + size - 1 in region.range
+                for region in const_regions
+            ):
+                (float_value,) = struct.unpack(
+                    "<f" if size == 4 else "<d", image.read(inst.pointer, size)
+                )
+                yield FloatConstant(inst.pointer, size, float_value)
