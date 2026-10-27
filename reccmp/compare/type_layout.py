@@ -192,7 +192,9 @@ def get_name_for_offset(
 
         if t.kind == TypeKind.ARRAY:
             element = types.get(types.element_type(t.key))
-            assert element.size
+            if not element.size:
+                # Preserve the byte offset when a forward reference has no layout.
+                break
 
             array_idx = offset // element.size
             type_key = element.key
