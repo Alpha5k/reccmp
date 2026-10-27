@@ -75,7 +75,7 @@ global_regex = re.compile(
     (?:                           # Suffix options:
         \(\w|                     # - Open paren: call constructor
         \)\(|                     # - Close paren, open paren: function pointer variable
-        \[.*|                     # - Open bracket: array with or without size
+        \s*\[.*|                  # - Open bracket: array with or without size
         \s*=|
         \s*;|
         \s*$                      # - End of string
@@ -83,6 +83,14 @@ global_regex = re.compile(
 """,
     flags=re.X,
 )
+
+
+type_definition_regex = re.compile(r"\b(?:struct|union|class|enum)(?:\s+\w+)?\s*$")
+
+
+def defines_type(line: str) -> bool:
+    """Recognize the type declaration immediately before its opening brace."""
+    return type_definition_regex.search(line) is not None
 
 
 def get_variable_name(line: str) -> str | None:

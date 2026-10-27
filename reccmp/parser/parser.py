@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import PurePath
 from typing import Iterator
 from .util import (
+    defines_type,
     get_class_name,
     get_variable_name,
     unwrap_line_comment,
@@ -467,11 +468,25 @@ class DecompParser:
     ):
         variable_name = None
         failure_code = AlertCode.NO_SUITABLE_NAME
+        skip_until = -1
 
-        for start, stop, token in candidates:
+        for i, (start, stop, token) in enumerate(candidates):
+            if start <= skip_until:
+                continue
+
             excerpt = text[start:stop]
 
             if token == TokenType.CODE:
+                # An inline type definition precedes the variable's declarator.
+                if (
+                    defines_type(excerpt)
+                    and i + 1 < len(candidates)
+                    and candidates[i + 1][2] == TokenType.CURLY_OPEN
+                    and candidates[i + 1][0] in self.enclosures
+                ):
+                    skip_until = self.enclosures[candidates[i + 1][0]]
+                    continue
+
                 variable_name = get_variable_name(excerpt)
                 if variable_name:
                     if excerpt.startswith("return"):
