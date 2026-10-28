@@ -245,6 +245,88 @@ def test_create_analysis_floats_do_not_replace_overlap(db: EntityDb):
     assert e is None
 
 
+def test_create_analysis_floats_xmm_constant(db: EntityDb):
+    """An unmatched __xmm@ constant read by a scalar float instruction
+    is named by its value, as it would be in an image without symbols."""
+    with db.batch() as batch:
+        batch.set(
+            ImageId.RECOMP,
+            100,
+            type=EntityType.DATA,
+            name="__xmm@80000000800000008000000080000000",
+            size=16,
+        )
+
+    binfile = Mock(spec=[])
+
+    with patch(
+        "reccmp.compare.analyze.find_float_consts",
+        return_value=[(100, 4, -0.0)],
+    ):
+        create_analysis_floats(db, ImageId.RECOMP, binfile)
+
+    e = db.get(ImageId.RECOMP, 100)
+    assert e is not None
+    assert e.get("type") == EntityType.FLOAT
+    assert e.get("name") == "-0.0"
+    # The constant keeps its 16-byte footprint.
+    assert e.any_size(ImageId.RECOMP) == 16
+
+
+def test_create_analysis_floats_xmm_constant_inside(db: EntityDb):
+    """A scalar read from inside an __xmm@ constant does not rename it."""
+    with db.batch() as batch:
+        batch.set(
+            ImageId.RECOMP,
+            100,
+            type=EntityType.DATA,
+            name="__xmm@3f8000003f8000003f8000003f800000",
+            size=16,
+        )
+
+    binfile = Mock(spec=[])
+
+    with patch(
+        "reccmp.compare.analyze.find_float_consts",
+        return_value=[(104, 4, 1.0)],
+    ):
+        create_analysis_floats(db, ImageId.RECOMP, binfile)
+
+    e = db.get(ImageId.RECOMP, 100)
+    assert e is not None
+    assert e.get("type") == EntityType.DATA
+    assert e.get("name") == "__xmm@3f8000003f8000003f8000003f800000"
+    assert db.get(ImageId.RECOMP, 104) is None
+
+
+def test_create_analysis_floats_xmm_constant_matched(db: EntityDb):
+    """A matched __xmm@ constant already has the same name in both images: keep it."""
+    with db.batch() as batch:
+        batch.set(
+            ImageId.ORIG,
+            200,
+            type=EntityType.DATA,
+            name="__xmm@80000000800000008000000080000000",
+            size=16,
+        )
+        batch.set(ImageId.RECOMP, 100, size=16)
+        batch.match(200, 100)
+
+    binfile = Mock(spec=[])
+
+    with patch(
+        "reccmp.compare.analyze.find_float_consts",
+        return_value=[(100, 4, -0.0)],
+    ):
+        create_analysis_floats(db, ImageId.RECOMP, binfile)
+
+    e = db.get(ImageId.RECOMP, 100)
+    assert e is not None
+    assert e.matched
+    assert e.get("type") == EntityType.DATA
+    assert e.get("name") == "__xmm@80000000800000008000000080000000"
+
+
 def test_create_analysis_vtordisps(db: EntityDb, binfile: PEImage):
     """Should create entities for the detected vtordisp and the referenced functions."""
     create_analysis_vtordisps(db, ImageId.ORIG, binfile)

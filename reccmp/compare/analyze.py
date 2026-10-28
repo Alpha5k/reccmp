@@ -107,6 +107,19 @@ def create_analysis_floats(db: EntityDb, img_id: ImageId, binfile: PEImage):
                     name=str(float_value),
                     size=size,
                 )
+                continue
+
+            # MSVC names its 16-byte SSE constants after their contents (__xmm@<hex>).
+            # In an image without symbols, a scalar read of the same constant can only be
+            # named by its float value, so an unmatched __xmm@ constant is named that way too.
+            # Otherwise every instruction that uses it would differ between the two images.
+            ent = db.get(img_id, addr)
+            if (
+                ent is not None
+                and not ent.matched
+                and (ent.best_name() or "").startswith("__xmm@")
+            ):
+                batch.set(img_id, addr, type=EntityType.FLOAT, name=str(float_value))
 
 
 def create_seh_entities(db: EntityDb, img_id: ImageId, binfile: PEImage):
