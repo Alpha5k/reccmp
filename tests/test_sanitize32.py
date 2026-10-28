@@ -259,6 +259,29 @@ def test_no_placeholder_for_jumps():
     assert op_str != "<OFFSET1>"
 
 
+def test_conditional_jump_uses_name():
+    """The optimizer turns a conditional call in tail position into a conditional
+    jump to the other function (e.g. a destructor that ends with
+    `if (open) Close();` becomes `jne Close`). The displacement to that function
+    differs between the two binaries, so use its name as we do for JMP."""
+    name_lookup = Mock(spec=NameReplacementProtocol, return_value="Close")
+    p = ParseAsm(name_lookup=name_lookup)
+    _, op_str = p.sanitize((0x1000, 6, "jne", "0x2000"))
+
+    assert op_str == "Close"
+    name_lookup.assert_called_with(0x2000, exact=True, indirect=False)
+
+
+def test_conditional_jump_without_name():
+    """A conditional jump to an address without a name (i.e. inside the function)
+    still shows the displacement."""
+    name_lookup = Mock(spec=NameReplacementProtocol, return_value=None)
+    p = ParseAsm(name_lookup=name_lookup)
+    _, op_str = p.sanitize((0x1000, 2, "je", "0x1006"))
+
+    assert op_str == "0x4"
+
+
 def test_jmp_ignore_placeholder():
     """Do not use a cached placeholder value for a JMP instruction."""
     p = ParseAsm()
