@@ -236,6 +236,7 @@ class CvdumpAnalysis:
 
                 # Iterate through static variables defined in this function
                 # generate decorated name "<variable name>___<func name>"
+                function_symbol = node_dict[key].decorated_name or sym.name
                 for v in sym.static_variables:
                     key = NodeKey(v.section, v.offset)
                     if key not in node_dict:
@@ -243,7 +244,7 @@ class CvdumpAnalysis:
                     node_dict[key].node_type = EntityType.DATA
                     # TODO this format is required for `match_msvc::match_static_variables` to find the variable
                     # Look at either documenting this dependency or reworking the query
-                    node_dict[key].decorated_name = f"{v.name}___{sym.name}"
+                    node_dict[key].decorated_name = f"{v.name}___{function_symbol}"
                     node_dict[key].friendly_name = v.name
                     try:
                         v_info = parser.types.get(v.type)
