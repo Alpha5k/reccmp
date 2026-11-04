@@ -18,6 +18,7 @@ from reccmp.compare.analyze import (
     create_imports,
     create_import_thunks,
     create_seh_entities,
+    unname_static_copies,
 )
 from reccmp.analysis.funcinfo import FuncInfo, UnwindMapEntry
 
@@ -325,6 +326,100 @@ def test_create_analysis_floats_xmm_constant_matched(db: EntityDb):
     assert e.matched
     assert e.get("type") == EntityType.DATA
     assert e.get("name") == "__xmm@80000000800000008000000080000000"
+
+
+def test_unname_static_copies(db: EntityDb):
+    """Unmatched recomp variables that share a name (a header's static variable,
+    one copy per object file) lose the name, as the original's copies have none."""
+    with db.batch() as batch:
+        batch.set(ImageId.RECOMP, 100, type=EntityType.DATA, name="fTwoPi", size=4)
+        batch.set(ImageId.RECOMP, 200, type=EntityType.DATA, name="fTwoPi", size=4)
+        batch.set(ImageId.RECOMP, 300, type=EntityType.DATA, name="gUnique", size=4)
+
+    unname_static_copies(db)
+
+    for addr in (100, 200):
+        e = db.get(ImageId.RECOMP, addr)
+        assert e is not None
+        assert e.best_name() is None
+        assert e.get("static_copy")
+
+    e = db.get(ImageId.RECOMP, 300)
+    assert e is not None
+    assert e.best_name() == "gUnique"
+    assert not e.get("static_copy")
+
+
+def test_unname_static_copies_matched(db: EntityDb):
+    """A copy that is matched to the original (named by an annotation) keeps its name,
+    and so does its last unmatched namesake."""
+    with db.batch() as batch:
+        batch.set(ImageId.ORIG, 500, type=EntityType.DATA, name="fTwoPi", size=4)
+        batch.set(ImageId.RECOMP, 100, type=EntityType.DATA, name="fTwoPi", size=4)
+        batch.match(500, 100)
+        batch.set(ImageId.RECOMP, 200, type=EntityType.DATA, name="fTwoPi", size=4)
+
+    unname_static_copies(db)
+
+    for addr in (100, 200):
+        e = db.get(ImageId.RECOMP, addr)
+        assert e is not None
+        assert e.best_name() == "fTwoPi"
+
+
+def test_unname_static_copies_name_in_orig(db: EntityDb):
+    """Copies keep their name while the original image has a variable of that name
+    (one copy annotated): every use of a copy is shown by that name on both sides."""
+    with db.batch() as batch:
+        batch.set(ImageId.ORIG, 500, type=EntityType.DATA, name="aFFStates", size=40)
+        batch.set(ImageId.RECOMP, 100, type=EntityType.DATA, name="aFFStates", size=40)
+        batch.match(500, 100)
+        batch.set(ImageId.RECOMP, 200, type=EntityType.DATA, name="aFFStates", size=40)
+        batch.set(ImageId.RECOMP, 300, type=EntityType.DATA, name="aFFStates", size=40)
+
+    unname_static_copies(db)
+
+    for addr in (100, 200, 300):
+        e = db.get(ImageId.RECOMP, addr)
+        assert e is not None
+        assert e.best_name() == "aFFStates"
+        assert not e.get("static_copy")
+
+
+def test_unname_static_copies_not_data(db: EntityDb):
+    """Only variables: same-named functions are left alone."""
+    with db.batch() as batch:
+        batch.set(ImageId.RECOMP, 100, type=EntityType.FUNCTION, name="Update")
+        batch.set(ImageId.RECOMP, 200, type=EntityType.FUNCTION, name="Update")
+
+    unname_static_copies(db)
+
+    for addr in (100, 200):
+        e = db.get(ImageId.RECOMP, addr)
+        assert e is not None
+        assert e.best_name() == "Update"
+
+
+def test_create_analysis_floats_static_copy(db: EntityDb):
+    """An unnamed copy of a header's float constant is named by its value,
+    as the original's copy is."""
+    with db.batch() as batch:
+        batch.set(ImageId.RECOMP, 100, type=EntityType.DATA, name="fPi", size=4)
+        batch.set(ImageId.RECOMP, 200, type=EntityType.DATA, name="fPi", size=4)
+
+    unname_static_copies(db)
+    binfile = Mock(spec=[])
+
+    with patch(
+        "reccmp.compare.analyze.find_float_consts",
+        return_value=[(100, 4, 3.1415927410125732)],
+    ):
+        create_analysis_floats(db, ImageId.RECOMP, binfile)
+
+    e = db.get(ImageId.RECOMP, 100)
+    assert e is not None
+    assert e.get("type") == EntityType.FLOAT
+    assert e.get("name") == "3.1415927410125732"
 
 
 def test_create_analysis_vtordisps(db: EntityDb, binfile: PEImage):
