@@ -192,14 +192,15 @@ class ParseAsm:
                 # To avoid falling into jump handling
                 return (inst_mnemonic, inst_op_str)
 
-            if inst_mnemonic == "jmp":
-                # The unwind section contains JMPs to other functions.
-                # If we have a name for this address, use it. If not,
-                # do not create a new placeholder. We will instead
-                # fall through to generic jump handling below.
-                potential_name = self.lookup(op_str_address, exact=True)
-                if potential_name is not None:
-                    return (inst_mnemonic, potential_name)
+            # The unwind section contains JMPs to other functions, and the
+            # optimizer turns a call in tail position into a JMP, or a
+            # conditional jump (e.g. JNE) when the call is conditional.
+            # If we have a name for this address, use it. If not,
+            # do not create a new placeholder. We will instead
+            # fall through to generic jump handling below.
+            potential_name = self.lookup(op_str_address, exact=True)
+            if potential_name is not None:
+                return (inst_mnemonic, potential_name)
 
             # Else: this is any jump
             # Show the jump offset rather than the absolute address

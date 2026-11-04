@@ -47,6 +47,7 @@ from .analyze import (
     create_seh_entities,
     complete_partial_floats,
     complete_partial_strings,
+    unname_static_copies,
     match_entry,
     match_exports,
     import_sections,
@@ -243,6 +244,7 @@ class Compare:
         match_ref(self._db, self.report)
         unique_names_for_overloaded_functions(self._db)
         name_thunks(self._db)
+        unname_static_copies(self._db)
 
         # Search for const data values and read bytes from the binaries.
         # This happens last because establishing all other entities first

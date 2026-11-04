@@ -500,6 +500,26 @@ def test_static_variable_parent(parser):
     assert parser.variables[0].parent_function == 0x1234
 
 
+def test_static_variable_in_namespace(parser):
+    """A static variable inside a function keeps its bare name in a namespace:
+    the PDB lists it in the function's scope without the namespace."""
+
+    parser.read("""\
+        namespace geo {
+        // FUNCTION: TEST 0x1234
+        void ProjClip::Op()
+        {
+           // GLOBAL: TEST 0x5555
+           static const float kMinW = 1e-7f;
+        }
+        }
+        """)
+
+    assert len(parser.variables) == 1
+    assert parser.variables[0].is_static is True
+    assert parser.variables[0].name == "kMinW"
+
+
 @pytest.mark.xfail(
     reason="""Without the FUNCTION marker we don't know that we are inside a function,
     so we do not identify this variable as static."""

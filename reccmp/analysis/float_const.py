@@ -17,6 +17,10 @@ from reccmp.formats import PEImage
 
 SCALAR_SSE_OPCODES = (0x10, 0x51, 0x58, 0x59, 0x5A, 0x5C, 0x5D, 0x5E, 0x5F)
 
+# Scalar compares: ucomiss/comiss (0F 2E/2F) and, with a 66 prefix, ucomisd/comisd.
+# A constant that is only ever compared against would otherwise go unnamed.
+SCALAR_COMPARE_OPCODES = (0x2E, 0x2F)
+
 SINGLE_PRECISION_OPCODES = frozenset(
     [
         (0xD8, 0x05),  # fadd
@@ -32,6 +36,11 @@ SINGLE_PRECISION_OPCODES = frozenset(
     + [
         (0xF3, 0x0F, opcode, modrm)
         for opcode in SCALAR_SSE_OPCODES
+        for modrm in range(0x05, 0x40, 0x08)
+    ]
+    + [
+        (0x0F, opcode, modrm)
+        for opcode in SCALAR_COMPARE_OPCODES
         for modrm in range(0x05, 0x40, 0x08)
     ]
 )
@@ -53,6 +62,11 @@ DOUBLE_PRECISION_OPCODES = frozenset(
         for opcode in SCALAR_SSE_OPCODES
         for modrm in range(0x05, 0x40, 0x08)
     ]
+    + [
+        (0x66, 0x0F, opcode, modrm)
+        for opcode in SCALAR_COMPARE_OPCODES
+        for modrm in range(0x05, 0x40, 0x08)
+    ]
 )
 
 FLOAT_OPCODES = frozenset([*SINGLE_PRECISION_OPCODES, *DOUBLE_PRECISION_OPCODES])
@@ -60,8 +74,11 @@ FLOAT_OPCODES = frozenset([*SINGLE_PRECISION_OPCODES, *DOUBLE_PRECISION_OPCODES]
 
 # Match a superset of the floating point instructions above.
 # Uses positive lookahead to support overlapping matches.
+# The unprefixed compare (0F 2E/2F) must not match inside a 66-prefixed one (the double compare),
+# which would read the 8-byte constant as a 4-byte one.
 FLOAT_INSTRUCTION_RE = re.compile(
-    rb"(?=((?:[\xd8\xd9\xdc\xdd]|[\xf2\xf3]\x0f[\x10\x51\x58\x59\x5a\x5c-\x5f])"
+    rb"(?=((?:[\xd8\xd9\xdc\xdd]|[\xf2\xf3]\x0f[\x10\x51\x58\x59\x5a\x5c-\x5f]"
+    rb"|\x66\x0f[\x2e\x2f]|(?<!\x66)\x0f[\x2e\x2f])"
     rb"[\x05\x0d\x15\x1d\x25\x2d\x35\x3d].{4}))",
     flags=re.S,
 )

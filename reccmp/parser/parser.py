@@ -304,7 +304,11 @@ class DecompParser:
         is_static = bool(parent_functions)
 
         for marker in markers:
-            qualified_name = self._qualify(variable_name, marker.pos)
+            # A static inside a function keeps its bare name: the PDB lists it in the
+            # function's scope without the enclosing namespace.
+            qualified_name = (
+                variable_name if is_static else self._qualify(variable_name, marker.pos)
+            )
 
             parent_function = None
             if is_static:

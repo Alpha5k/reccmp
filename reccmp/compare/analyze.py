@@ -107,6 +107,62 @@ def create_analysis_floats(db: EntityDb, img_id: ImageId, binfile: PEImage):
                     name=str(float_value),
                     size=size,
                 )
+                continue
+
+            # MSVC names its 16-byte SSE constants after their contents (__xmm@<hex>).
+            # In an image without symbols, a scalar read of the same constant can only be
+            # named by its float value, so an unmatched __xmm@ constant is named that way too.
+            # Otherwise every instruction that uses it would differ between the two images.
+            # The same goes for the unnamed copies of a header's static variables (see
+            # unname_static_copies): a float constant among them is named by its value.
+            ent = db.get(img_id, addr)
+            if (
+                ent is not None
+                and not ent.matched
+                and (
+                    (ent.best_name() or "").startswith("__xmm@")
+                    or ent.get("static_copy")
+                )
+            ):
+                batch.set(img_id, addr, type=EntityType.FLOAT, name=str(float_value))
+
+
+def unname_static_copies(db: EntityDb):
+    """A static variable defined in a header (e.g. `static const float fTwoPi = 2 * fPi;`)
+    gets its own copy in every object file that includes the header. All the copies have
+    the same name, so no annotation can tell them apart, and the original image's copies
+    stay unnamed. Ours would show their name in every instruction that uses them and differ
+    from the original for that reason alone.
+    Treat them as the original's copies are treated: drop the name of each unmatched recomp
+    data entity whose name is shared by another unmatched one. create_analysis_floats then
+    names a float constant among them by its value; the others get a placeholder.
+    A name the original image also has (an annotation named one of its copies) is kept on
+    every copy: the original shows that name, and our copies compare equal by it."""
+    orig_names = {
+        ent.best_name()
+        for ent in db.all(ImageId.ORIG)
+        if ent.entity_type == EntityType.DATA and ent.best_name() is not None
+    }
+    copies: dict[str, list[int]] = {}
+    for ent in db.unmatched(ImageId.RECOMP):
+        name = ent.best_name()
+        if ent.entity_type == EntityType.DATA and name is not None:
+            addr = ent.addr(ImageId.RECOMP)
+            assert addr is not None
+            copies.setdefault(name, []).append(addr)
+
+    with db.batch() as batch:
+        for name, addrs in copies.items():
+            if len(addrs) < 2 or name in orig_names:
+                continue
+            for addr in addrs:
+                batch.set(
+                    ImageId.RECOMP,
+                    addr,
+                    name=None,
+                    computed_name=None,
+                    static_copy=True,
+                )
 
 
 def create_seh_entities(db: EntityDb, img_id: ImageId, binfile: PEImage):

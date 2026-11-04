@@ -16,6 +16,22 @@ def test_float_detect_overlap():
     assert len(floats) == 2
 
 
+def test_float_detect_compares():
+    """comiss/ucomiss read a 4-byte constant, comisd/ucomisd (66 prefix) an 8-byte one.
+    The unprefixed opcode inside a comisd must not count as a second, 4-byte read."""
+    code = (
+        b"\x0f\x2f\x05\x00\x10\x00\x00"  # comiss xmm0, [0x1000]
+        b"\x0f\x2e\x0d\x04\x10\x00\x00"  # ucomiss xmm1, [0x1004]
+        b"\x66\x0f\x2f\x05\x08\x10\x00\x00"  # comisd xmm0, [0x1008]
+    )
+    floats = [(f.opcode, f.pointer) for f in find_float_instructions_in_buffer(code)]
+    assert floats == [
+        ((0x0F, 0x2F, 0x05), 0x1000),
+        ((0x0F, 0x2E, 0x0D), 0x1004),
+        ((0x66, 0x0F, 0x2F, 0x05), 0x1008),
+    ]
+
+
 def test_basic_float_detection(binfile: PEImage):
     """Make sure we detect some known floats in our sample PE image"""
     floats = list(find_float_consts(binfile))
