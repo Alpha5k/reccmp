@@ -86,6 +86,13 @@ class FunctionComparator:
                 partial(get_name_for_offset, self.types),
             ),
             is_32bit=self.is_32bit,
+            relocations=(
+                self.orig_bin.highlow_relocations
+                if self.is_32bit
+                and isinstance(self.orig_bin, PEImage)
+                and self.orig_bin.relocations
+                else None
+            ),
         )
         self.recomp_sanitize = ParseAsm(
             addr_test=create_valid_addr_lookup(
@@ -98,6 +105,13 @@ class FunctionComparator:
                 partial(get_name_for_offset, self.types),
             ),
             is_32bit=self.is_32bit,
+            relocations=(
+                self.recomp_bin.highlow_relocations
+                if self.is_32bit
+                and isinstance(self.recomp_bin, PEImage)
+                and self.recomp_bin.relocations
+                else None
+            ),
         )
 
     def _source_ref_of_recomp_addr(self, recomp_addr: int | None) -> str | None:

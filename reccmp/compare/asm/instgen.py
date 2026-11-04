@@ -12,8 +12,10 @@ from .const import JUMP_MNEMONICS
 
 
 @cache
-def get_disassembler(is_32: bool = True) -> Cs:
-    return Cs(CS_ARCH_X86, CS_MODE_32 if is_32 else CS_MODE_16)
+def get_disassembler(is_32: bool = True, detail: bool = False) -> Cs:
+    disassembler = Cs(CS_ARCH_X86, CS_MODE_32 if is_32 else CS_MODE_16)
+    disassembler.detail = detail
+    return disassembler
 
 
 DisasmLiteTuple = tuple[int, int, str, str]
@@ -28,6 +30,11 @@ The fields are:
 switch_displacement_regex = re.compile(r"\w+ ptr (?:cs\:)?\[.+\+ (0x[0-9a-f]+)\]")
 
 displacement_regex = re.compile(r".*\+ (0x[0-9a-f]+)\]")
+
+
+class OperandLocation(NamedTuple):
+    address: int
+    size: int
 
 
 class SectionType(Enum):
@@ -67,13 +74,23 @@ def stop_at_int3(
 
 class InstructGen:
     # pylint: disable=too-many-instance-attributes
-    def __init__(self, blob: bytes, start: int, is_32bit: bool = True) -> None:
+    def __init__(
+        self,
+        blob: bytes,
+        start: int,
+        is_32bit: bool = True,
+        *,
+        with_encoding: bool = False,
+    ) -> None:
         self.is_32bit = is_32bit
+        self.with_encoding = with_encoding
         self.blob = blob
         self.start = start
         self.end = len(blob) + start
         self.section_end: int = self.end
         self.code_tracks: list[list[DisasmLiteTuple]] = []
+        self.immediates: dict[int, OperandLocation] = {}
+        self.displacements: dict[int, OperandLocation] = {}
 
         # Todo: Could be refactored later
         self.cur_addr: int = 0
@@ -166,9 +183,29 @@ class InstructGen:
         # jump table is finished. We could disassemble up to the next verified
         # code address and stitch it together)
 
-        disassembler = get_disassembler(self.is_32bit)
+        disassembler = get_disassembler(self.is_32bit, self.with_encoding)
         blob_cropped = self.blob[addr - self.start :]
-        instructions = list(stop_at_int3(disassembler.disasm_lite(blob_cropped, addr)))
+        if self.with_encoding:
+            instructions = []
+            for inst in disassembler.disasm(blob_cropped, addr):
+                if inst.mnemonic == "int3":
+                    break
+                instructions.append(
+                    (inst.address, inst.size, inst.mnemonic, inst.op_str)
+                )
+                encoding = inst.encoding
+                if encoding.imm_size:
+                    self.immediates[inst.address] = OperandLocation(
+                        inst.address + encoding.imm_offset, encoding.imm_size
+                    )
+                if encoding.disp_size:
+                    self.displacements[inst.address] = OperandLocation(
+                        inst.address + encoding.disp_offset, encoding.disp_size
+                    )
+        else:
+            instructions = list(
+                stop_at_int3(disassembler.disasm_lite(blob_cropped, addr))
+            )
         self.code_tracks.append(instructions)
         return instructions
 

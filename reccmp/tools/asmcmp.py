@@ -282,6 +282,14 @@ def main() -> int:
 
     # Number of functions compared (i.e. excluding stubs)
     implemented_funcs, _, total_effective_accuracy = report_function_accuracy(report)
+    perfect_funcs = sum(
+        1
+        for entity in report.entities.values()
+        if entity.is_function()
+        and entity.is_matched()
+        and not entity.is_stub
+        and entity.accuracy == 1.0
+    )
 
     # Print diff summary to terminal
     if not args.silent and args.diff is None:
@@ -339,6 +347,7 @@ def main() -> int:
     print(
         f"\nImplemented:  {implemented:.2f}%  ({implemented_funcs} / {function_count})"
     )
+    print(f"Perfect:      {perfect_funcs} / {function_count}")
     print(f"Accuracy:     {effective_accuracy:.2f}%")
     print(f"Progress:     {progress:.2f}%")
 

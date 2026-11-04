@@ -7,10 +7,10 @@ so that virtual addresses are replaced by symbol name or a generic
 placeholder string."""
 
 import re
-from functools import cache
+from functools import cache, partial
 from typing_extensions import Buffer
 from .const import JUMP_MNEMONICS, SINGLE_OPERAND_INSTS
-from .instgen import DisasmLiteTuple, InstructGen, SectionType
+from .instgen import DisasmLiteTuple, InstructGen, OperandLocation, SectionType
 from .replacement import AddrTestProtocol, NameReplacementProtocol
 
 AsmExcerpt = list[tuple[int | None, str]]
@@ -41,10 +41,12 @@ class ParseAsm:
         addr_test: AddrTestProtocol | None = None,
         name_lookup: NameReplacementProtocol | None = None,
         is_32bit: bool = True,
+        relocations: set[int] | None = None,
     ) -> None:
         self.addr_test = addr_test
         self.name_lookup = name_lookup
         self.is_32bit = is_32bit
+        self.relocations = relocations
 
         self.replacements: dict[int, str] = {}
         self.indirect_replacements: dict[int, str] = {}
@@ -54,8 +56,14 @@ class ParseAsm:
         self.replacements = {}
         self.indirect_replacements = {}
 
-    def is_addr(self, value: int) -> bool:
-        """Wrapper for user-provided address test"""
+    def is_addr(self, value: int, operand: OperandLocation | None = None) -> bool:
+        """Use the encoded field's relocation when available, otherwise test its value."""
+        if self.relocations is not None:
+            return (
+                operand is not None
+                and operand.size == 4
+                and operand.address in self.relocations
+            )
         if callable(self.addr_test):
             return self.addr_test(value)
 
@@ -112,20 +120,26 @@ class ParseAsm:
         value = int(match.group(1), 16)
         return self.replace(value)
 
-    def hex_replace_relocated(self, match: re.Match) -> str:
+    def hex_replace_relocated(
+        self, match: re.Match, *, operand: OperandLocation | None = None
+    ) -> str:
         """For replacing immediate value operands. We only want to
         use the placeholder if we are certain that this is a valid address.
         We can check the relocation table to find out."""
         value = int(match.group(1), 16)
-        if self.is_addr(value):
+        if self.is_addr(value, operand):
             return self.replace(value)
 
         return match.group(0)
 
-    def hex_replace_annotated(self, match: re.Match) -> str:
+    def hex_replace_annotated(
+        self, match: re.Match, *, operand: OperandLocation | None = None
+    ) -> str:
         """For replacing immediate value operands. Here we replace the value
         only if the name lookup returns something. Do not use a placeholder."""
         value = int(match.group(1), 16)
+        if self.relocations is not None and not self.is_addr(value, operand):
+            return match.group(0)
         placeholder = self.lookup(value)
         if placeholder is not None:
             return placeholder
@@ -141,7 +155,13 @@ class ParseAsm:
         value = int(match.group(1), 16)
         return self.indirect_replace(value)
 
-    def sanitize(self, inst: DisasmLiteTuple) -> tuple[str, str]:
+    def sanitize(
+        self,
+        inst: DisasmLiteTuple,
+        *,
+        immediate: OperandLocation | None = None,
+        displacement: OperandLocation | None = None,
+    ) -> tuple[str, str]:
         # pylint: disable=too-many-return-statements
         # For jumps or calls, if the entire op_str is a hex number, the value
         # is a relative offset.
@@ -166,7 +186,7 @@ class ParseAsm:
                 return (inst_mnemonic, self.replace(op_str_address, exact=True))
 
             if inst_mnemonic == "push":
-                if self.is_addr(op_str_address):
+                if self.is_addr(op_str_address, immediate):
                     return (inst_mnemonic, self.replace(op_str_address))
 
                 # To avoid falling into jump handling
@@ -196,14 +216,20 @@ class ParseAsm:
         # i.e. ptr [register + something]
         # Otherwise we would use a placeholder for every stack variable,
         # vtable call, or this->member access.
-        op_str = displace_replace_regex.sub(self.hex_replace_relocated, op_str)
+        op_str = displace_replace_regex.sub(
+            partial(self.hex_replace_relocated, operand=displacement), op_str
+        )
 
         # In the event of pointer comparison, only replace the immediate value
         # if it is a known address.
         if inst_mnemonic == "cmp":
-            op_str = immediate_replace_regex.sub(self.hex_replace_annotated, op_str)
+            op_str = immediate_replace_regex.sub(
+                partial(self.hex_replace_annotated, operand=immediate), op_str
+            )
         else:
-            op_str = immediate_replace_regex.sub(self.hex_replace_relocated, op_str)
+            op_str = immediate_replace_regex.sub(
+                partial(self.hex_replace_relocated, operand=immediate), op_str
+            )
 
         return (inst_mnemonic, op_str)
 
@@ -211,7 +237,12 @@ class ParseAsm:
         self.reset()
         asm: AsmExcerpt = []
 
-        ig = InstructGen(bytes(data), start_addr, self.is_32bit)
+        ig = InstructGen(
+            bytes(data),
+            start_addr,
+            self.is_32bit,
+            with_encoding=self.relocations is not None,
+        )
 
         for section in ig.sections:
             if section.type == SectionType.CODE:
@@ -231,7 +262,11 @@ class ParseAsm:
                         or inst_size > 4
                         or not self.is_32bit
                     ):
-                        result = self.sanitize(inst)
+                        result = self.sanitize(
+                            inst,
+                            immediate=ig.immediates.get(inst_address),
+                            displacement=ig.displacements.get(inst_address),
+                        )
                     else:
                         result = (inst_mnemonic, inst_op_str)
 

@@ -622,6 +622,14 @@ class PEImage(Image):
         jump destinations given by local offset) will be here.
         One use case is to tell whether an immediate value in an operand represents
         a virtual address or just a big number."""
+        return self.get_relocations()
+
+    @cached_property
+    def highlow_relocations(self) -> set[int]:
+        """Locations of 32-bit absolute fields, excluding padding and other types."""
+        return self.get_relocations(relocation_type=3)
+
+    def get_relocations(self, relocation_type: int | None = None) -> set[int]:
         region = self.get_data_directory_region(
             PEDataDirectoryItemType.BASE_RELOCATION_TABLE
         )
@@ -646,6 +654,17 @@ class PEImage(Image):
                 v[0]
                 for v in struct.iter_unpack("<H", reloc[ofs + 8 : ofs + block_size])
             ]
+            if relocation_type is not None:
+                typed_values = []
+                index = 0
+                while index < len(values):
+                    value = values[index]
+                    index += 1
+                    if value >> 12 == relocation_type:
+                        typed_values.append(value)
+                    if value >> 12 == 4:  # HIGHADJ consumes the following word.
+                        index += 1
+                values = typed_values
             relocations.update(
                 [
                     # HACK: ignore the relocation type for now (the top 4 bits of the value).
